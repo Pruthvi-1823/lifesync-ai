@@ -5,8 +5,17 @@ from pathlib import Path
 from datetime import datetime
 import sqlite3
 import re
+from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI(title="LifeSync AI Complete Backend", version="1.0")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 def get_db_connection():
