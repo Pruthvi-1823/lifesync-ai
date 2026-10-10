@@ -25,13 +25,19 @@ def get_db_connection():
 
 
 def ensure_schema():
-    """Adds the completed_at column to tasks if it doesn't exist yet (safe to run every start)."""
+    """Adds necessary columns if they don't exist yet (safe to run every start)."""
     conn = sqlite3.connect("lifesync.db")
     try:
         conn.execute("ALTER TABLE tasks ADD COLUMN completed_at TEXT")
         conn.commit()
     except sqlite3.OperationalError:
-        pass  # column already exists (or table not created yet)
+        pass  
+    
+    try:
+        conn.execute("ALTER TABLE shared_splits ADD COLUMN is_settled INTEGER DEFAULT 0")
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass
     finally:
         conn.close()
 
@@ -89,7 +95,7 @@ def aura_chat(req: ChatRequest):
 
         conn.close()
         return {
-            "aura_response": f"☀️️ Morning Briefing: You have {task_count} pending tasks on your schedule. Financial overview: {debt_text}. All your savings buckets are securely locked and protected!"
+            "aura_response": f"☀ Morning Briefing: You have {task_count} pending tasks on your schedule. Financial overview: {debt_text}. All your savings buckets are securely locked and protected!"
         }
 
     if "remind" in msg or "task" in msg or "todo" in msg:
@@ -103,7 +109,6 @@ def aura_chat(req: ChatRequest):
             "aura_response": f"📝 Task Added: Successfully logged '{task_title}' with {priority} Priority to your task list."
         }
 
-    # Pre-purchase check: "Can I afford..." or "Can I buy..."
     if "can i" in msg or "afford" in msg or "should i buy" in msg:
         match_amt = re.search(r'(\d+)', msg)
         amount = float(match_amt.group(1)) if match_amt else 0.0
@@ -206,7 +211,6 @@ def aura_chat(req: ChatRequest):
         cleaned_msg = re.sub(r'(remove|delete|drop|bucket|the)', '', req.message, flags=re.IGNORECASE).strip()
 
         if cleaned_msg:
-            # 1. Fetch the bucket to get its amount before deleting
             cursor.execute("SELECT * FROM money_buckets WHERE user_id = ? AND bucket_name LIKE ? AND LOWER(bucket_name) != 'spendable'", (req.user_id, f"%{cleaned_msg}%"))
             bucket = cursor.fetchone()
 
@@ -214,10 +218,8 @@ def aura_chat(req: ChatRequest):
                 bucket_amount = bucket["allocated_amount"]
                 bucket_name = bucket["bucket_name"]
 
-                # 2. Delete the bucket
                 cursor.execute("DELETE FROM money_buckets WHERE id = ?", (bucket["id"],))
 
-                # 3. Add its amount back to Spendable
                 cursor.execute("""
                     UPDATE money_buckets 
                     SET allocated_amount = allocated_amount + ? 
@@ -291,7 +293,7 @@ def aura_chat(req: ChatRequest):
             shortfall = amount - current_spendable
             conn.close()
             return {
-                "aura_response": f"⚠️️ Guardrail Alert: You're trying to spend ₹{amount:,.0f}, but your Spendable balance is only ₹{current_spendable:,.0f}. This transaction would dip ₹{shortfall:,.0f} into your locked savings!"
+                "aura_response": f"⚠ Guardrail Alert: You're trying to spend ₹{amount:,.0f}, but your Spendable balance is only ₹{current_spendable:,.0f}. This transaction would dip ₹{shortfall:,.0f} into your locked savings!"
             }
 
         new_spendable = current_spendable - amount
@@ -313,7 +315,6 @@ def aura_chat(req: ChatRequest):
 
 @app.post("/tasks/update/{task_id}")
 async def update_task_status(task_id: int, payload: dict):
-    """is_completed = 1 marks a task done (and stamps the time); 0 restores it to active."""
     is_completed = payload.get("is_completed", 1)
     completed_at = datetime.now().strftime("%d %b %Y, %I:%M %p") if is_completed else None
     conn = sqlite3.connect("lifesync.db")
@@ -339,7 +340,6 @@ async def delete_task(task_id: int):
 
 @app.get("/tasks/history/{user_id}")
 async def get_task_history(user_id: int):
-    """Returns all completed tasks, newest first."""
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute(
@@ -350,6 +350,44 @@ async def get_task_history(user_id: int):
     rows = [dict(r) for r in cursor.fetchall()]
     conn.close()
     return {"completed_tasks": rows}
+
+
+# ---------------- SPLIT SETTLEMENT ENDPOINT ----------------
+
+@app.post("/splits/settle/{split_id}")
+async def settle_split(split_id: int):
+    """Marks a shared split as settled and credits the amount back to Spendable."""
+    conn = sqlite3.connect("lifesync.db")
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    
+    cursor.execute("SELECT * FROM shared_splits WHERE id = ?", (split_id,))
+    split = cursor.fetchone()
+    
+    if not split:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Split not found")
+        
+    if split["is_settled"] == 1:
+        conn.close()
+        return {"status": "success", "message": "Split already settled."}
+        
+    user_id = split["user_id"]
+    amount_owed = split["amount_owed"]
+    
+    # Mark split as settled
+    cursor.execute("UPDATE shared_splits SET is_settled = 1 WHERE id = ?", (split_id,))
+    
+    # Credit the returned amount back to the user's Spendable balance
+    cursor.execute("""
+        UPDATE money_buckets 
+        SET allocated_amount = allocated_amount + ? 
+        WHERE user_id = ? AND LOWER(bucket_name) = 'spendable'
+    """, (amount_owed, user_id))
+    
+    conn.commit()
+    conn.close()
+    return {"status": "success", "message": f"Split settled and ₹{amount_owed} returned to Spendable."}
 
 
 @app.get("/app", response_class=HTMLResponse)
