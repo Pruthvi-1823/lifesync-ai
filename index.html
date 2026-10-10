@@ -467,8 +467,6 @@
         const USER_ID = 1;
 
         // ---------- Login / session ----------
-        // Front-end demo credentials. Replace checkCredentials() with a call to
-        // your backend (e.g. POST /login) when real authentication is available.
         const AUTH = { username: 'alex', password: 'lifesync123' };
         const SESSION_KEY = 'lifesync_logged_in';
         let refreshTimer = null;
@@ -552,7 +550,6 @@
             btn.innerText = show ? 'Hide' : 'Show';
         }
 
-        // Escape text before putting it into innerHTML (prevents broken layout / XSS)
         function esc(v) {
             return String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
         }
@@ -569,7 +566,6 @@
             activeBtn.classList.add('bg-[#00ff66]', 'text-black', 'shadow-lg', 'shadow-[#00ff66]/20');
         }
 
-        // Builds one task card: title, priority badge, ✓ complete button, ✕ delete button
         function renderTaskCard(t) {
             return `
                 <div class="w-full bg-zinc-950 neon-border p-4 rounded-2xl flex justify-between items-center gap-3 shadow-md">
@@ -584,7 +580,6 @@
                 </div>`;
         }
 
-        // ---------- Confirmation popup (returns a Promise<boolean>) ----------
         function showConfirm({ title = 'Are you sure?', message = '', okLabel = 'Delete' } = {}) {
             return new Promise(resolve => {
                 const modal = document.getElementById('confirm-modal');
@@ -614,8 +609,6 @@
             });
         }
 
-        // ---------- Task actions ----------
-        // POST /tasks/update/{task_id}  ->  is_completed 1 = done, 0 = restore
         async function setTaskCompleted(taskId, isCompleted) {
             try {
                 const res = await fetch(`${API_URL}/tasks/update/${taskId}`, {
@@ -632,7 +625,6 @@
         const completeTask = id => setTaskCompleted(id, 1);
         const restoreTask = id => setTaskCompleted(id, 0);
 
-        // DELETE /tasks/delete/{task_id}  ->  asks for confirmation first
         async function deleteTask(taskId) {
             const confirmed = await showConfirm({
                 title: 'Delete this task?',
@@ -649,7 +641,19 @@
             }
         }
 
-        // ---------- Completed task history ----------
+        // ---------- Settle Split Action ----------
+        async function settleSplit(splitId) {
+            try {
+                const res = await fetch(`${API_URL}/splits/settle/${splitId}`, {
+                    method: 'POST'
+                });
+                if (!res.ok) throw new Error("Settlement failed");
+                loadDashboard();
+            } catch (err) {
+                console.warn("Could not settle split:", err);
+            }
+        }
+
         function renderHistoryCard(t) {
             const when = t.completed_at ? `<p class="text-[11px] text-zinc-500 font-mono mt-0.5">Completed: ${esc(t.completed_at)}</p>` : '';
             return `
@@ -667,7 +671,6 @@
                 </div>`;
         }
 
-        // GET /tasks/history/{user_id}
         async function loadHistory() {
             const container = document.getElementById('history-container');
             try {
@@ -695,7 +698,6 @@
                 document.getElementById('total-balance').innerText = `₹${data.user.total_balance.toLocaleString()}`;
                 document.getElementById('overview-balance').innerText = `₹${data.user.total_balance.toLocaleString()}`;
 
-                // ---------- Render Buckets ----------
                 const bucketsContainer = document.getElementById('buckets-container');
                 const overviewBuckets = document.getElementById('overview-buckets');
                 let bucketsHTML = '', overviewBucketsHTML = '';
@@ -715,16 +717,13 @@
                         </div>`;
                 };
 
-                // Money Buckets tab: locked buckets first, spendable bucket(s) last
                 const orderedBuckets = [...data.buckets].sort((a, b) => (b.is_locked === 1) - (a.is_locked === 1));
                 bucketsHTML = orderedBuckets.map(renderBucketCard).join('');
 
-                // Overview snapshot keeps the original order
                 overviewBucketsHTML = data.buckets.slice(0, 2).map(renderBucketCard).join('');
                 bucketsContainer.innerHTML = bucketsHTML;
                 overviewBuckets.innerHTML = overviewBucketsHTML;
 
-                // ---------- Render Tasks ----------
                 const tasksContainer = document.getElementById('tasks-container');
                 const overviewTasks = document.getElementById('overview-tasks');
                 document.getElementById('overview-tasks-count').innerText = `${data.active_tasks.length} Active`;
@@ -744,7 +743,7 @@
                     overviewTasks.innerHTML = overviewTasksHTML;
                 }
 
-                // ---------- Render Splits ----------
+                // ---------- Render Splits with Settle Button ----------
                 const splitsContainer = document.getElementById('splits-container');
                 let totalSplits = 0;
                 if (data.pending_splits.length === 0) {
@@ -759,7 +758,10 @@
                                     <p class="text-sm font-semibold text-zinc-200">${esc(s.friend_name)}</p>
                                     <p class="text-xs text-zinc-400">${esc(s.description)}</p>
                                 </div>
-                                <span class="shrink-0 text-[#00ff66] font-mono font-bold text-sm">₹${s.amount_owed}</span>
+                                <div class="flex items-center gap-3 shrink-0">
+                                    <span class="text-[#00ff66] font-mono font-bold text-sm">₹${s.amount_owed}</span>
+                                    <button onclick="settleSplit(${Number(s.id)})" class="bg-[#00ff66] hover:bg-[#00cc55] text-black font-bold px-3 py-1.5 rounded-xl text-xs transition shadow">Settle</button>
+                                </div>
                             </div>`;
                     });
                     splitsContainer.innerHTML = splitsHTML;
@@ -827,13 +829,12 @@
                 chatBox.insertAdjacentHTML('beforeend', `
                     <div class="bg-red-950/40 border border-red-800/60 p-3.5 rounded-2xl text-red-200 shadow-md">
                         <p class="text-xs font-bold text-red-400 uppercase tracking-wider mb-1 font-mono">⚠️ Connection Alert</p>
-                        <p class="text-sm">Could not reach FastAPI backend at 127.0.0.1:8000. Ensure uvicorn is running!</p>
+                        <p class="text-sm">Could not reach FastAPI backend. Ensure service is active!</p>
                     </div>`);
                 chatBox.scrollTop = chatBox.scrollHeight;
             }
         }
 
-        // ---------- Startup: show the app only for a signed-in session ----------
         if (isLoggedIn()) {
             showApp();
         } else {
