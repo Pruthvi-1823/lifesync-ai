@@ -356,7 +356,7 @@ async def get_task_history(user_id: int):
 
 @app.post("/splits/settle/{split_id}")
 async def settle_split(split_id: int):
-    """Marks a shared split as settled and credits the amount back to Spendable."""
+    """Marks a shared split as settled and credits the amount back to Spendable and Total Balance."""
     conn = sqlite3.connect("lifesync.db")
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
@@ -385,9 +385,16 @@ async def settle_split(split_id: int):
         WHERE user_id = ? AND LOWER(bucket_name) = 'spendable'
     """, (amount_owed, user_id))
     
+    # 🌟 ADD THIS: Also increase the user's total balance
+    cursor.execute("""
+        UPDATE users 
+        SET total_balance = total_balance + ? 
+        WHERE id = ?
+    """, (amount_owed, user_id))
+    
     conn.commit()
     conn.close()
-    return {"status": "success", "message": f"Split settled and ₹{amount_owed} returned to Spendable."}
+    return {"status": "success", "message": f"Split settled and ₹{amount_owed} returned to Spendable and Total Balance."}
 
 
 @app.get("/app", response_class=HTMLResponse)
