@@ -157,7 +157,7 @@ def aura_chat(req: ChatRequest):
             new_spendable = current_spendable - amount
             cursor.execute("UPDATE money_buckets SET allocated_amount = ? WHERE id = ?", (new_spendable, bucket_id))
             
-            # Also deduct from user's total balance on split payments
+            # Deduct from user's total balance on split payments
             cursor.execute("UPDATE users SET total_balance = total_balance - ? WHERE id = ?", (amount, req.user_id))
 
         cursor.execute("INSERT INTO shared_splits (user_id, friend_name, amount_owed, description) VALUES (?, ?, ?, ?)",
@@ -302,7 +302,7 @@ def aura_chat(req: ChatRequest):
         new_spendable = current_spendable - amount
         cursor.execute("UPDATE money_buckets SET allocated_amount = ? WHERE id = ?", (new_spendable, bucket_id))
         
-        # 🌟 Deduct from Total Balance as well
+        # Deduct from Total Balance as well
         cursor.execute("UPDATE users SET total_balance = total_balance - ? WHERE id = ?", (amount, req.user_id))
         
         cursor.execute("INSERT INTO expenses (user_id, amount, description, bucket_id) VALUES (?, ?, ?, ?)", (req.user_id, amount, req.message, bucket_id))
@@ -392,7 +392,7 @@ async def settle_split(split_id: int):
         WHERE user_id = ? AND LOWER(bucket_name) = 'spendable'
     """, (amount_owed, user_id))
     
-    # 🌟 ADD THIS: Also increase the user's total balance
+    # Increase the user's total balance
     cursor.execute("""
         UPDATE users 
         SET total_balance = total_balance + ? 
